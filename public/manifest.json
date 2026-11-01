@@ -1,0 +1,23 @@
+{
+  "name": "Muhammed Sanfar Portfolio",
+  "short_name": "Sanfar",
+  "description": "Portfolio of Muhammed Sanfar, UI/UX Designer & Front-End Developer from Palakkad, Kerala, India.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f8f5f2",
+  "theme_color": "#0020d7",
+  "lang": "en-IN",
+  "categories": ["portfolio", "productivity", "design"],
+  "screenshots": [],
+  "icons": [
+    {
+      "src": "/Logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "prefer_related_applications": false
+}

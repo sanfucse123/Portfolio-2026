@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="badge-gradient" x1="100" y1="0" x2="100" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2b8fff"/>
+      <stop offset="1" stop-color="#000055"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#badge-gradient)" d="M40 0H160A40 40 0 0 1 200 40V160A40 40 0 0 1 160 200H40A40 40 0 0 1 0 160V40A40 40 0 0 1 40 0Z"/>
+  <path fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" d="M140 62C132 46 116 40 100 40C78 40 62 52 62 70C62 90 80 96 100 100C120 104 138 110 138 130C138 148 122 160 100 160C84 160 68 154 60 138"/>
+</svg>

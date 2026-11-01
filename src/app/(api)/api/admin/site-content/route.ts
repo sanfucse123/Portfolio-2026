@@ -1,0 +1,200 @@
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { requireAdminSession } from "@/lib/admin-auth";
+import { getInstagramMediaUrl, isInstagramUrl, resolveInstagramPreview } from "@/lib/instagram";
+import { getAboutContent, upsertAboutContent, getHeroContent, upsertHeroContent, getHomeContent, upsertHomeContent, getBehanceShowcaseEmbeds, upsertBehanceShowcaseEmbeds, getPinterestShowcaseItems, upsertPinterestShowcaseItems } from "@/lib/site-content";
+import type { BehanceShowcaseEmbed, PinterestShowcaseItem } from "@/lib/site-content";
+
+const aboutContentSchema = z.object({
+  aboutImage: z.string(),
+  homeAboutImage1: z.string(),
+  homeAboutImage2: z.string(),
+  homeAboutImage3: z.string(),
+  aboutInstagramImage1: z.string(),
+  aboutInstagramImage2: z.string(),
+  aboutInstagramImage3: z.string(),
+  aboutInstagramImage4: z.string(),
+  aboutInstagramLink1: z.string(),
+  aboutInstagramLink2: z.string(),
+  aboutInstagramLink3: z.string(),
+  aboutInstagramLink4: z.string(),
+});
+
+const heroContentSchema = z.object({
+  heroGreeting: z.string(),
+  heroName: z.string(),
+  heroSubcopy: z.string(),
+  heroAudienceTags: z.string(),
+  heroAvailabilityText: z.string(),
+  heroCtaPrimaryLabel: z.string(),
+  heroCtaPrimaryUrl: z.string(),
+  heroCtaSecondaryLabel: z.string(),
+  heroCtaSecondaryUrl: z.string(),
+});
+
+const homeContentSchema = z.object({
+  scrollingBannerItems: z.string(),
+  scrollingLogos: z.array(z.string()),
+  socialLinks: z.object({
+    github: z.string(),
+    behance: z.string(),
+    linkedin: z.string(),
+    instagram: z.string(),
+  }),
+  otherSocialLinks: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        url: z.string(),
+      })
+    )
+    .default([]),
+  pageLinks: z.object({
+    about: z.string(),
+    projects: z.string(),
+    services: z.string(),
+    contact: z.string(),
+  }),
+});
+
+export async function GET() {
+  const { response } = await requireAdminSession();
+  if (response) {
+    return response;
+  }
+
+  const about = await getAboutContent();
+  const hero = await getHeroContent();
+  const home = await getHomeContent();
+  const behanceShowcase = await getBehanceShowcaseEmbeds();
+  const pinterestShowcase = await getPinterestShowcaseItems();
+  return NextResponse.json({ about, hero, home, behanceShowcase, pinterestShowcase });
+}
+
+import { LRUCache } from "lru-cache";
+
+// LRU cache-based rate limiting to prevent spam and accidental infinite loops
+const RATE_LIMIT_WINDOW_MS = 1000 * 60; // 1 minute
+const MAX_REQUESTS_PER_WINDOW = 30; // Max 30 updates per minute
+
+const ipRequestCache = new LRUCache<string, { count: number; timestamp: number }>({
+  max: 1000,
+  ttl: RATE_LIMIT_WINDOW_MS,
+});
+
+export async function PUT(request: NextRequest) {
+  const ip = request.headers.get("x-forwarded-for") || "unknown";
+  const now = Date.now();
+  const record = ipRequestCache.get(ip);
+
+  if (record) {
+    if (now - record.timestamp < RATE_LIMIT_WINDOW_MS) {
+      record.count += 1;
+      if (record.count > MAX_REQUESTS_PER_WINDOW) {
+        return NextResponse.json({ error: "Too many requests. Please try again later." }, { status: 429 });
+      }
+    } else {
+      ipRequestCache.set(ip, { count: 1, timestamp: now });
+    }
+  } else {
+    ipRequestCache.set(ip, { count: 1, timestamp: now });
+  }
+
+  const { response } = await requireAdminSession();
+  if (response) {
+    return response;
+  }
+
+  try {
+    const body = await request.json();
+    
+    // Legacy support: if type is missing, we assume it's about
+    const type = body.type || 'about';
+    const data = body.data || body; // Legacy body had data at root
+
+    if (type === 'about') {
+      const about = aboutContentSchema.parse(data);
+      const resolvedAbout = { ...about };
+      const mappings = [
+        ["aboutInstagramImage1", "aboutInstagramLink1"],
+        ["aboutInstagramImage2", "aboutInstagramLink2"],
+        ["aboutInstagramImage3", "aboutInstagramLink3"],
+        ["aboutInstagramImage4", "aboutInstagramLink4"],
+      ] as const;
+
+      for (const [imageKey, linkKey] of mappings) {
+        const imageValue = resolvedAbout[imageKey];
+        const linkValue = resolvedAbout[linkKey];
+        const instagramSource =
+          (imageValue && isInstagramUrl(imageValue) && imageValue) ||
+          (linkValue && isInstagramUrl(linkValue) && linkValue) ||
+          "";
+
+        if (!instagramSource) {
+          continue;
+        }
+
+        const resolvedPreview = await resolveInstagramPreview(instagramSource);
+        const mediaFallback = getInstagramMediaUrl(instagramSource);
+
+        if (resolvedPreview || mediaFallback) {
+          resolvedAbout[imageKey] = resolvedPreview || mediaFallback || resolvedAbout[imageKey];
+          resolvedAbout[linkKey] = instagramSource;
+        }
+      }
+
+      await upsertAboutContent(resolvedAbout);
+      return NextResponse.json({ about: resolvedAbout });
+    }
+
+    if (type === 'hero') {
+      const hero = heroContentSchema.parse(data);
+      await upsertHeroContent(hero);
+      return NextResponse.json({ hero });
+    }
+
+    if (type === 'home') {
+      const home = homeContentSchema.parse(data);
+      await upsertHomeContent(home);
+      return NextResponse.json({ home });
+    }
+
+    if (type === 'behanceShowcase') {
+      const parsed = z.array(z.object({
+        id: z.string(),
+        src: z.string(),
+        title: z.string(),
+      })).parse(data);
+      const embeds = parsed.filter((e) => e.src.trim().length > 0);
+      await upsertBehanceShowcaseEmbeds(embeds as BehanceShowcaseEmbed[]);
+      return NextResponse.json({ behanceShowcase: embeds });
+    }
+
+    if (type === 'pinterestShowcase') {
+      const parsed = z.array(z.object({
+        id: z.string(),
+        src: z.string(),
+        title: z.string(),
+      })).parse(data);
+      const items = parsed.filter((e) => e.src.trim().length > 0);
+      await upsertPinterestShowcaseItems(items as PinterestShowcaseItem[]);
+      return NextResponse.json({ pinterestShowcase: items });
+    }
+
+    return NextResponse.json({ error: "Invalid type" }, { status: 400 });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: "Invalid input", details: error.errors },
+        { status: 400 }
+      );
+    }
+
+    console.error("Update site content error:", error);
+    return NextResponse.json(
+      { error: "Internal server error", message: error instanceof Error ? error.message : String(error) }, 
+      { status: 500 }
+    );
+  }
+}
